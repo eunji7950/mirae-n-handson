@@ -61,6 +61,24 @@ class ItemSearchServiceTest {
     }
 
     @Test
+    @DisplayName("search: 두 조회 사이에 사라진 행만 빠지고 건수와 나머지 순서는 그대로다")
+    void skipsRowsDeletedBetweenQueries() {
+        Item first = ItemFixtures.item(12, unit, "대분수의 덧셈", 3, ItemStatus.ACTIVE, calc);
+        Item vanished = ItemFixtures.item(7, unit, "진분수의 뺄셈", 2, ItemStatus.ACTIVE);
+        Item last = ItemFixtures.item(3, unit, "분모가 같은 분수의 덧셈", 1, ItemStatus.ACTIVE);
+        when(itemRepository.findAll(any(Specification.class), any(Pageable.class)))
+            .thenReturn(new PageImpl<>(List.of(first, vanished, last), PageRequest.of(0, 20), 3));
+        // 상세 조회 시점에는 7번이 사라졌고, 순서도 보장되지 않는다.
+        when(itemRepository.findWithDetailsByIdIn(anyCollection())).thenReturn(List.of(last, first));
+
+        ItemSearchResponse response = itemSearchService.search(criteria("", "1"));
+
+        assertThat(response.count()).isEqualTo(3);
+        assertThat(response.message()).isNull();
+        assertThat(response.rows()).extracting(ItemSearchRowResponse::id).containsExactly(12, 3);
+    }
+
+    @Test
     @DisplayName("search: 0건이면 안내 메시지를 채우고 상세 조회는 하지 않는다")
     void zeroResultsHasMessage() {
         when(itemRepository.findAll(any(Specification.class), any(Pageable.class)))

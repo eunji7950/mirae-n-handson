@@ -149,4 +149,74 @@ class ItemSearchCriteriaTest {
         assertThat(criteria.keyword()).isEqualTo("마지막");
         assertThat(criteria.page()).isEqualTo(2);
     }
+
+    /** 키 · 값 쌍을 요청 순서대로 넣는다. */
+    private static ItemSearchCriteria fromQuery(String... keyValues) {
+        MultiValueMap<String, String> params = new LinkedMultiValueMap<>();
+        for (int i = 0; i < keyValues.length; i += 2) {
+            params.add(keyValues[i], keyValues[i + 1]);
+        }
+        return ItemSearchCriteria.fromParams(params);
+    }
+
+    @Test
+    @DisplayName("q[]=a&q[]=b 는 PHP reset() 처럼 첫 원소 a 를 쓴다")
+    void appendArrayUsesFirstElement() {
+        assertThat(fromQuery("q[]", "a", "q[]", "b").keyword()).isEqualTo("a");
+    }
+
+    @Test
+    @DisplayName("q[x]=a&q[x]=b 는 같은 키를 덮어써 b 를 쓴다")
+    void keyedArrayUsesOverwrittenValue() {
+        assertThat(fromQuery("q[x]", "a", "q[x]", "b").keyword()).isEqualTo("b");
+    }
+
+    @Test
+    @DisplayName("q=b&q[]=a 는 나중에 온 배열이 이겨 a 를 쓴다")
+    void laterArrayOverridesScalar() {
+        assertThat(fromQuery("q", "b", "q[]", "a").keyword()).isEqualTo("a");
+    }
+
+    @Test
+    @DisplayName("q[]=a&q=b 는 나중에 온 스칼라가 이겨 b 를 쓴다")
+    void laterScalarOverridesArray() {
+        assertThat(fromQuery("q[]", "a", "q", "b").keyword()).isEqualTo("b");
+    }
+
+    @Test
+    @DisplayName("q[a][b]=x 는 첫 원소가 배열이라 문자열 Array 가 된다")
+    void nestedArrayBecomesArrayString() {
+        assertThat(fromQuery("q[a][b]", "x").keyword()).isEqualTo("Array");
+    }
+
+    @Test
+    @DisplayName("level[]=3 은 첫 원소 3 을 난이도로 쓴다")
+    void levelArrayUsesFirstElement() {
+        assertThat(fromQuery("level[]", "3").level()).isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("page[]=7 은 첫 원소 7 을 페이지로 쓴다")
+    void pageArrayUsesFirstElement() {
+        assertThat(fromQuery("page[]", "7").page()).isEqualTo(7);
+    }
+
+    @Test
+    @DisplayName("q=a&q=b 는 마지막 값 b 를 쓴다")
+    void repeatedScalarUsesLastValue() {
+        assertThat(fromQuery("q", "a", "q", "b").keyword()).isEqualTo("b");
+    }
+
+    @Test
+    @DisplayName("파라미터가 하나도 없으면 fromParams 는 모든 항목을 기본값으로 둔다")
+    void noParamsUsesDefaults() {
+        ItemSearchCriteria criteria = fromQuery();
+
+        assertThat(criteria.keyword()).isEmpty();
+        assertThat(criteria.unit()).isEmpty();
+        assertThat(criteria.tag()).isEmpty();
+        assertThat(criteria.level()).isNull();
+        assertThat(criteria.page()).isEqualTo(1);
+        assertThat(orders(criteria)).containsExactly("level desc", "id asc");
+    }
 }

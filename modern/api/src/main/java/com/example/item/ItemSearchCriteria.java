@@ -1,6 +1,7 @@
 package com.example.item;
 
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import org.springframework.data.domain.Sort;
 import org.springframework.util.MultiValueMap;
@@ -29,6 +30,9 @@ record ItemSearchCriteria(String keyword, String unit, Long level, String tag, S
     /** PHP 의 {@code /^[0-9]+$/} 는 끝의 개행 하나를 허용한다. */
     private static final Pattern PAGE_NUMBER = Pattern.compile("([0-9]+)\\n?");
 
+    /** PHP 에서 배열을 {@code (string)} 으로 바꾼 결과. */
+    private static final String PHP_ARRAY_TO_STRING = "Array";
+
     private static final String ASC = "asc";
     private static final String DESC = "desc";
     private static final String SORT_ID = "id";
@@ -43,16 +47,20 @@ record ItemSearchCriteria(String keyword, String unit, Long level, String tag, S
     private static final String PROP_LEVEL = "level";
     private static final String PROP_CREATED_AT = "createdAt";
 
-    /** 요청 파라미터에서 조건을 만든다. 같은 이름이 여러 번 오면 PHP 처럼 마지막 값을 쓴다. */
+    /**
+     * 요청 파라미터에서 조건을 만든다. PHP {@code $_GET} 처럼 같은 이름이 여러 번 오면 마지막 값을 쓰고,
+     * {@code name[]} · {@code name[key]} 배열로 오면 첫 원소를 쓴다(search.php:51-80 의 {@code reset()}).
+     */
     static ItemSearchCriteria fromParams(MultiValueMap<String, String> params) {
+        String page = phpValue(params, "page");
         return of(
-            lastValue(params, "q"),
-            lastValue(params, "unit"),
-            lastValue(params, "level"),
-            lastValue(params, "tag"),
-            lastValue(params, "sort"),
-            lastValue(params, "dir"),
-            params.containsKey("page") ? lastValue(params, "page") : "1");
+            orEmpty(phpValue(params, "q")),
+            orEmpty(phpValue(params, "unit")),
+            orEmpty(phpValue(params, "level")),
+            orEmpty(phpValue(params, "tag")),
+            orEmpty(phpValue(params, "sort")),
+            orEmpty(phpValue(params, "dir")),
+            page == null ? "1" : page);
     }
 
     static ItemSearchCriteria of(
@@ -78,13 +86,53 @@ record ItemSearchCriteria(String keyword, String unit, Long level, String tag, S
         return !tag.isEmpty();
     }
 
-    private static String lastValue(MultiValueMap<String, String> params, String name) {
-        List<String> values = params.get(name);
-        if (values == null || values.isEmpty()) {
-            return "";
+    /**
+     * PHP 가 {@code $_GET[name]} 으로 받을 값을 문자열로 돌려준다. 해당 키가 없으면 {@code null} 이다.
+     * 스칼라 키와 배열 키가 함께 오면 나중에 나온 쪽이 이긴다. 키는 처음 나온 순서로 들어 있다.
+     * 배열의 첫 원소는 처음 나온 배열 키다. {@code name[]} 이면 그 첫 값, {@code name[key]} 이면
+     * 덮어쓴 마지막 값을 쓴다. 첫 원소가 다시 배열({@code name[a][b]})이면 PHP 처럼 {@code "Array"} 다.
+     * 서로 다른 키를 번갈아 보낸 경우({@code q[]=a&q=b&q[]=c})는 순서 정보가 없어 재현하지 못한다.
+     */
+    private static String phpValue(MultiValueMap<String, String> params, String name) {
+        int index = 0;
+        int scalarIndex = -1;
+        int arrayIndex = -1;
+        String scalar = null;
+        String arrayFirst = null;
+        String arrayPrefix = name + "[";
+        for (Map.Entry<String, List<String>> entry : params.entrySet()) {
+            String key = entry.getKey();
+            List<String> values = entry.getValue();
+            if (values != null && !values.isEmpty()) {
+                if (key.equals(name)) {
+                    scalarIndex = index;
+                    scalar = values.get(values.size() - 1);
+                } else if (arrayIndex < 0 && key.startsWith(arrayPrefix) && key.indexOf(']') > 0) {
+                    arrayIndex = index;
+                    arrayFirst = firstArrayElement(key.substring(name.length()), values);
+                }
+            }
+            index++;
         }
-        String last = values.get(values.size() - 1);
-        return last == null ? "" : last;
+        if (scalarIndex < 0 && arrayIndex < 0) {
+            return null;
+        }
+        String value = scalarIndex > arrayIndex ? scalar : arrayFirst;
+        return value == null ? "" : value;
+    }
+
+    /** {@code brackets} 는 {@code [] · [key] · [a][b]} 처럼 이름 뒤에 붙은 부분이다. */
+    private static String firstArrayElement(String brackets, List<String> values) {
+        int close = brackets.indexOf(']');
+        if (brackets.startsWith("[", close + 1)) {
+            return PHP_ARRAY_TO_STRING;
+        }
+        boolean appendKey = close == 1;
+        return appendKey ? values.get(0) : values.get(values.size() - 1);
+    }
+
+    private static String orEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     private static String parseKeyword(String q) {
