@@ -2,6 +2,7 @@ package com.example.item;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -44,7 +45,10 @@ public class ItemSearchService {
         return new ItemSearchResponse(rows, total, total == 0 ? NO_RESULT_MESSAGE : null);
     }
 
-    /** 페이지의 id 순서를 유지한 채 단원 · 태그를 한 번에 가져와 행으로 바꾼다(컬렉션 fetch 와 페이징을 분리). */
+    /**
+     * 페이지의 id 순서를 유지한 채 단원 · 태그를 한 번에 가져와 행으로 바꾼다(컬렉션 fetch 와 페이징을 분리).
+     * 두 조회 사이에 사라진 행은 건너뛴다. 레거시도 행 조회와 건수 조회가 별개 쿼리라 같은 상황에서 행만 빠진다.
+     */
     private List<ItemSearchRowResponse> loadRows(List<Item> pageItems) {
         if (pageItems.isEmpty()) {
             return List.of();
@@ -54,6 +58,7 @@ public class ItemSearchService {
             .collect(Collectors.toMap(Item::getId, Function.identity()));
         return ids.stream()
             .map(byId::get)
+            .filter(Objects::nonNull)
             .map(ItemSearchRowResponse::from)
             .toList();
     }
